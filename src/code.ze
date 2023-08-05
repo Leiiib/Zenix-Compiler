@@ -1,7 +1,13 @@
 #use lib
 
+fun str genString(){
+    
+}
+
 fun main(){
 
-    print("Hello World!")
+    print("Hello World!", 3)
 
 }
+
+

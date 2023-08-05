@@ -1,18 +1,19 @@
-import ctypes
+from time import *
 
-def error(error: str):
-    print(f"\033[31;1m{error}\033[0m")
-
+iota = 1
 class TokenTypes():
-    TOKEN_NAME = 1
-    TOKEN_OPAREN = 2
-    TOKEN_CPAREN = 3
-    TOKEN_OCURLY = 4
-    TOKEN_CCURLY = 5
-    TOKEN_NUMBER = 6
-    TOKEN_STRING = 7
-    TOKEN_RETURN = 8
-    TOKEN_IMPORT = 9
+    
+    TOKEN_NAME = iota; iota += 1
+    TOKEN_OPAREN = iota; iota += 1
+    TOKEN_CPAREN = iota; iota += 1
+    TOKEN_OCURLY = iota; iota += 1
+    TOKEN_CCURLY = iota; iota += 1
+    TOKEN_NUMBER = iota; iota += 1
+    TOKEN_BOOLEAN = iota; iota += 1
+    TOKEN_STRING = iota; iota += 1
+    TOKEN_COMMA = iota; iota += 1
+    TOKEN_RETURN = iota; iota += 1
+    TOKEN_IMPORT = iota; iota += 1
 
     def from_index(index: int):
         dict = TokenTypes.__dict__
@@ -26,6 +27,13 @@ literal_tokens = {
     ")": TokenTypes.TOKEN_CPAREN,
     "{": TokenTypes.TOKEN_OCURLY,
     "}": TokenTypes.TOKEN_CCURLY,
+}
+
+literal_returns = {
+    "noreturn": None,
+    "str": TokenTypes.TOKEN_STRING,
+    "int": TokenTypes.TOKEN_NUMBER,
+    "bool": TokenTypes.TOKEN_BOOLEAN
 }
 
 class StmtTypes():
@@ -46,14 +54,13 @@ class Loc:
         self.col = col
 
     def display(self) -> str:
-        return (f"File: {self.file_path} r:{self.row + 1} c:{self.col + 1}")
+        return (f"<F:{self.file_path} R:{self.row + 1} C:{self.col + 1}>")
 
 class Token:
     def __init__(self, loc: Loc, type, value):
         self.type = type
         self.value = value
         self.loc = loc
-
 class Lexer:
     
     def __init__(self, src: str, f_path: str):
@@ -62,6 +69,9 @@ class Lexer:
         self.bol: int = 0
         self.row: int = 0
         self.file_path = f_path
+
+    def error(self, error: str):
+        print(f"\033[31;1m[ERROR REPORT AT {self.loc().display()} ] {error}\033[0m")
 
     def get_sub_str(self, start: int, end: int) -> str:
         value = self.src[start:end]
@@ -95,6 +105,9 @@ class Lexer:
         while (self.is_not_empty() and self.current_char() != "\n"):
             self.chop_char()
         
+    def is_string_delimiter(self, char):
+        if(char == '"' or char == "'"): return True
+        return False
 
     def next_token(self) -> Token:
         self.trim_left()    
@@ -104,11 +117,14 @@ class Lexer:
             self.trim_left()
 
         if(self.is_empty()): 
-            print("End of file")
             return False
 
         loc = self.loc()        
-        first = self.current_char()
+        first = self.current_char()     
+
+        if(first == ","):
+            self.chop_char()
+            return Token(loc, TokenTypes.TOKEN_COMMA, ",")
 
         if(self.current_char().isalpha()):
             index = self.cur
@@ -121,46 +137,137 @@ class Lexer:
             self.chop_char()
             return Token(loc, literal_tokens[first], first)
         
-        if(first == '"'):
+        if(self.is_string_delimiter(first)):
             self.chop_char()
             start = self.cur    
-            while (self.is_not_empty() and self.current_char() != '"'):
+            while (self.is_not_empty() and self.current_char() != first):
                 self.chop_char()
             
             if(self.is_not_empty()):
                 value = self.get_sub_str(start, self.cur)
                 self.chop_char()
                 return Token(loc, TokenTypes.TOKEN_STRING, value)
-
-            error(f'Unclosed string {loc.display()}')
-        
+            self.error('Unclosed string')
+            return False
         if(first.isnumeric()):
             start = self.cur
             while (self.is_not_empty() and self.current_char().isnumeric()):
                 self.chop_char()
-            print(self.is_empty())
             value = self.get_sub_str(start, self.cur)
             return Token(loc, TokenTypes.TOKEN_NUMBER, value)
         
-        error(f'Unrecognized token {loc.display()}')
+        self.error('Unrecognized token')
         return False
     
-class Satement:
-    
+class Statement:
+    def __init__(self):
+        pass
+
+class ReturnStatement(Statement):
+    def __init__(self, expresion: str):
+        self.expression = expresion
+        super().__init__()
+
+class FunctionCallStatement(Statement):
+    def __init__(self, name: str, args):
+        self.name = name
+        self.args = args
+        super().__init__()
 
 class Function:
-    def __init__(self):
-        pass          
+    def __init__(self, name: str, body: list, return_type: str = "noreturn"):
+        self.name = name
+        self.body = body
+        self.return_type = return_type
 
-def expect_token(lexer, token_type: int):
+def expect_token(lexer: Lexer, *token_types: int):
     token = lexer.next_token()
     if(not token):
-        error(f"Expected token")
+        lexer.error(f"Expected token of type/s {' or '.join([TokenTypes.from_index(type) for type in token_types])} but got end of file.")
         return False
-    if(token.type != TokenTypes.TOKEN_NAME):
+    for type in token_types:
+        if(token.type == type):
+            return token    
+    lexer.error(f"Expected token of type/s {' or '.join([TokenTypes.from_index(type) for type in token_types])} but got {TokenTypes.from_index(token.type)} '{token.value}'")
+    return False
 
-def parse_func(lexer: Lexer):
-    expect_token(lexer, TokenTypes.TOKEN_NAME)
+def parse_type(type: str):
+    token = expect_token(lexer, TokenTypes.TOKEN_NAME)
+    if(not token): return False
+    keyword = token.value
+    if(keyword != type):
+        lexer.error(f"Unexpected keyword '{keyword}'")
+        return False
+    return token
+
+def parse_args(lexer: Lexer):
+    if(not expect_token(lexer, TokenTypes.TOKEN_OPAREN)): return False
+
+    arglist = []
+    while True:
+        arg = expect_token(lexer, TokenTypes.TOKEN_NAME, TokenTypes.TOKEN_STRING, TokenTypes.TOKEN_NUMBER, TokenTypes.TOKEN_CPAREN)
+        if(not arg): return False
+        if(arg.type == TokenTypes.TOKEN_CPAREN): break
+        if(arg.type == TokenTypes.TOKEN_NAME):
+            if(not expect_token(lexer, TokenTypes.TOKEN_OPAREN)): return False
+            if(not expect_token(lexer, TokenTypes.TOKEN_CPAREN)): return False
+        arglist.append(arg.value)
+        comma_or_cparen = expect_token(lexer, TokenTypes.TOKEN_COMMA, TokenTypes.TOKEN_CPAREN)
+        if(not comma_or_cparen): return False
+        if(comma_or_cparen.type == TokenTypes.TOKEN_CPAREN): break
+        
+    return arglist
+
+def parse_fun_block(lexer: Lexer, return_type):
+    if(not expect_token(lexer, TokenTypes.TOKEN_OCURLY)): return False
+
+    block = []
+
+    while True:
+        name = lexer.next_token()
+        if(not name): return False
+        if(name.type == TokenTypes.TOKEN_CCURLY): break
+        if(name.value == "return"):
+            if(return_type == "noreturn"):
+                lexer.error("Function with no return type is returning something")
+                return False
+            expresion = expect_token(lexer, literal_returns[return_type])
+            if(not expresion): return False
+            block.append(ReturnStatement(expresion.value))
+        else:
+            args = parse_args(lexer) 
+            if(not args):
+                lexer.error(f"Coudln't parse arguments for function: {name.value}")
+                return False
+            block.append(FunctionCallStatement(name.value, args))
+
+    return block
+
+def parse_fun(lexer: Lexer):
+    isfun = parse_type("fun")
+    if(not isfun): return False
+    return_type_or_name = expect_token(lexer, TokenTypes.TOKEN_NAME)
+    if(not return_type_or_name): return False
+    name_or_oparen = lexer.next_token()
+    if(not name_or_oparen): return False
+    if(name_or_oparen.type == TokenTypes.TOKEN_NAME):
+        if(not return_type_or_name.value in literal_returns):
+            lexer.error(f"Function returns type is an invalid type '{return_type_or_name.value}'")
+            return False
+        return_type = return_type_or_name.value
+        fun_name = name_or_oparen.value
+        if(fun_name == "main"):
+            lexer.error("Main function cannot return any type")
+            return False
+        if(not expect_token(lexer, TokenTypes.TOKEN_OPAREN)): return False
+        if(not expect_token(lexer, TokenTypes.TOKEN_CPAREN)): return False
+    elif(name_or_oparen.type == TokenTypes.TOKEN_OPAREN):
+        return_type = "noreturn"
+        fun_name = return_type_or_name.value
+        if(not expect_token(lexer, TokenTypes.TOKEN_CPAREN)): return False
+    body = parse_fun_block(lexer, return_type)
+    if(not body): return False
+    return Function(fun_name, body, return_type)
 
 
 def read_file_to_list(file_path):
@@ -171,15 +278,16 @@ def read_file_to_list(file_path):
 
         return list(src)
     except FileNotFoundError as e:
-        error(f"Couldn't load file '{file_path}': {e}")
+        print(f"\033[31;1mCouldn't load file '{file_path}': {e}")
         exit()
 
 if __name__ == "__main__":
-    file_path = 'code.ze'
+    file_path = 'src/code.ze'
     src_list = read_file_to_list(file_path)
     lexer: Lexer = Lexer(src_list, "code.ze")
-    token = lexer.next_token()
-    while token:
-        if(token): 
-            print(f"{token.loc.display()} | {token.value} | {TokenTypes.from_index(token.type)}")
-        token = lexer.next_token()
+    fun = parse_fun(lexer)
+    print("Done compiling")
+    sleep(1)
+    print("\033c")
+    
+
