@@ -1,13 +1,1 @@
-#use lib
-
-fun str genString(){
-    
-}
-
-fun main(){
-
-    print("Hello World!", 3)
-
-}
-
-
+exit()
